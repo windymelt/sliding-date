@@ -1,0 +1,91 @@
+#!/bin/sh
+#|-*- mode:lisp -*-|#
+#| <Put a one-line description here>
+exec ros -Q -- $0 "$@"
+|#
+(progn ;;init forms
+  (ros:ensure-asdf)
+  #+quicklisp (ql:quickload '(local-time unix-opts) :silent t)
+  )
+
+(defpackage :ros.script.entry-charcount.3715641315
+  (:use :cl))
+(in-package :ros.script.entry-charcount.3715641315)
+
+(opts:define-opts
+  (:name :help
+   :description "Show this help"
+   :short #\h
+   :long "help")
+  (:name :format-string
+   :description "Format string"
+   :short #\f
+   :arg-parser #'identity
+   :long "format"
+   :meta-var "FORMAT")
+  (:name :begin
+   :description "Beginning date"
+   :short #\b
+   :arg-parser #'identity
+   :long "begin"
+   :meta-var "YYYY-MM-DD")
+  (:name :until
+   :description "Until date"
+   :short #\u
+   :arg-parser #'identity
+   :long "until"
+   :meta-var "YYYY-MM-DD")
+  (:name :stepday
+   :description "Step date"
+   :short #\s
+   :arg-parser #'parse-integer
+   :meta-var "N"))
+
+(defun unknown-option (condition)
+  (format t "warning: ~s option is unknown!~%" (opts:option condition))
+  (invoke-restart 'opts:skip-option))
+
+(defmacro when-option ((options opt) &body body)
+  `(let ((it (getf ,options ,opt)))
+     (when it
+       ,@body)))
+(defmacro require-option ((var options opt) &body body)
+  `(let ((,var (getf ,options ,opt)))
+     (unless ,var
+       (error (format nil "You must specify ~s option." ,opt)))
+     ,@body))
+(defmacro option-or ((var options opt else) &body body)
+  `(let ((,var (or (getf ,options ,opt) ,else)))
+     ,@body))
+
+(defun ts->str (ts) (local-time:format-timestring nil ts :format '(:year "-" (:month 2) "-" (:day 2))))
+
+(defun main (&rest argv)
+  (declare (ignorable argv))
+  (multiple-value-bind (options)
+      (handler-case (handler-bind ((opts:unknown-option #'unknown-option)) (opts:get-opts argv))
+        (opts:missing-arg (condition)
+          (format t "fatal: option ~s needs an argument!~%" (opts:option condition)))
+        (opts:arg-parser-failed (condition)
+          (format t "fatal: cannot parsr ~s as an argument of ~s~%" (opts:raw-arg condition) (opts:option condition))))
+    (when (getf options :help)
+      (opts:describe :prefix "Date expression generator"
+                     :suffix ""
+                     :usage-of "sliding-date")
+      (return-from main 1))
+    (require-option (begin options :begin)
+      (require-option (until options :until)
+        (option-or (format-string options :format-string "~a	~a~%")
+          (option-or (stepday options :stepday 1)
+            (let ((beginstamp (local-time:parse-timestring begin))
+                  (untilstamp (local-time:parse-timestring until)))
+              (when (local-time:timestamp> beginstamp untilstamp)
+                (error "Begin date should be earlier than until date."))
+              (loop for d = beginstamp
+                      then (local-time:timestamp+ d stepday :day)
+                    while (local-time:timestamp< d untilstamp)
+                    do (format t
+                               format-string
+                               (ts->str d)
+                               (ts->str (local-time:timestamp+ d stepday :day)))))))))))
+;;; vim: set ft=lisp lisp:
